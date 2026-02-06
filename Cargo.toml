@@ -18,3 +18,6 @@ proptest = "1.6"
 [[bench]]
 name = "decode_throughput"
 harness = false
+
+[workspace]
+members = [".", "fuzz"]
