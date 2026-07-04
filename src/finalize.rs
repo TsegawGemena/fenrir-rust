@@ -33,6 +33,10 @@ impl Finalizer {
         artifacts: FrameArtifacts,
         pool: &mut BufferPool,
     ) -> Result<Frame, DecodeError> {
+        if artifacts.payload_buffer.capacity() == 0 || artifacts.trailer_buffer.capacity() == 0 {
+            return Err(DecodeError::Internal("finalize called with empty buffer"));
+        }
+
         let frame = Frame {
             payload: artifacts.payload,
             checksum: artifacts.checksum,

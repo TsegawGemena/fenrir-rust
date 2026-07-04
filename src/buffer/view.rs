@@ -1,13 +1,15 @@
 use super::shared::SharedBuffer;
 
+/// Zero-copy slice into a pooled [`SharedBuffer`].
+///
+/// Views track the buffer generation so stale reads are rejected after the pool
+/// reuses backing memory during incremental decode.
 #[derive(Debug, Clone)]
 pub struct BufferView {
     owner: SharedBuffer,
     start: usize,
     len: usize,
     generation: u64,
-    #[cfg(feature = "buggy")]
-    ptr: *const u8,
 }
 
 impl BufferView {
@@ -18,34 +20,16 @@ impl BufferView {
             start,
             len,
             generation: owner.generation(),
-            #[cfg(feature = "buggy")]
-            ptr: owner.as_slice().as_ptr().wrapping_add(start),
         }
     }
 
     pub fn bind_owner(&mut self, owner: SharedBuffer) {
         self.generation = owner.generation();
         self.owner = owner;
-        #[cfg(feature = "buggy")]
-        {
-            self.ptr = self.owner.as_slice().as_ptr().wrapping_add(self.start);
-        }
-    }
-
-    #[cfg(feature = "buggy")]
-    pub fn poison_after_release(&mut self) {
-        self.owner = SharedBuffer::with_capacity(0, 0);
     }
 
     pub fn is_stale(&self) -> bool {
-        #[cfg(feature = "buggy")]
-        {
-            self.owner.capacity() == 0
-        }
-        #[cfg(not(feature = "buggy"))]
-        {
-            false
-        }
+        self.generation != self.owner.generation()
     }
 
     pub fn generation(&self) -> u64 {
@@ -54,18 +38,11 @@ impl BufferView {
 
     pub fn as_slice(&self) -> &[u8] {
         debug_assert!(!self.is_stale(), "read through stale BufferView");
-        #[cfg(not(feature = "buggy"))]
-        {
-            debug_assert!(
-                self.start + self.len <= self.owner.capacity(),
-                "view range exceeds owner capacity"
-            );
-            &self.owner.as_slice()[self.start..self.start + self.len]
-        }
-        #[cfg(feature = "buggy")]
-        {
-            unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
-        }
+        debug_assert!(
+            self.start + self.len <= self.owner.capacity(),
+            "view range exceeds owner capacity"
+        );
+        &self.owner.as_slice()[self.start..self.start + self.len]
     }
 
     pub fn into_owner(self) -> SharedBuffer {

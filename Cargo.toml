@@ -2,12 +2,10 @@
 name = "fenirer"
 version = "0.1.0"
 edition = "2021"
-description = "Incremental streaming frame decoder with buffer pooling"
+description = "Edge telemetry and event stream decoder for FENR/FN2R wire records"
 license = "MIT"
-
-[features]
-default = []
-buggy = []
+keywords = ["streaming", "telemetry", "parser", "iot", "decoder"]
+categories = ["encoding", "parser-implementations"]
 
 [dependencies]
 bitflags = "2.8"

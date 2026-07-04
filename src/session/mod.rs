@@ -78,34 +78,15 @@ impl DecodeSession {
     fn feed_once(&mut self, chunk: &[u8]) -> Result<usize, DecodeError> {
         let parser = self.parser.as_mut().unwrap();
 
-        #[cfg(feature = "buggy")]
-        {
-            if parser.write_cursor() + chunk.len() > parser.working_buffer().capacity()
-                && !parser.is_complete()
-            {
-                let old = parser.take_working_buffer()?;
-                self.pool.release(old);
-                let fresh = self.pool.acquire()?;
-                parser.set_working_buffer(fresh);
-            }
-        }
-
-        #[cfg(not(feature = "buggy"))]
-        {
-            let needed = parser.write_cursor() + chunk.len();
-            if needed > parser.working_buffer().capacity() {
-                invariants::check_no_trailer_pin(parser, "feed_once grow");
-                if parser.trailer_pinned_on_working() {
-                    return Err(DecodeError::Internal(
-                        "working buffer too small while trailer view is pinned",
-                    ));
-                }
-                let saved = parser.snapshot_working();
-                let old = parser.take_working_buffer()?;
-                self.pool.release(old);
-                let fresh = self.pool.acquire_sized(needed)?;
-                parser.reinstall_working(fresh, saved)?;
-            }
+        let needed = parser.write_cursor() + chunk.len();
+        if needed > parser.working_buffer().capacity() {
+            invariants::check_no_trailer_pin(parser, "feed_once grow");
+            invariants::validate_no_trailer_pin(parser)?;
+            let saved = parser.snapshot_working();
+            let old = parser.take_working_buffer()?;
+            self.pool.release(old);
+            let fresh = self.pool.acquire_sized(needed)?;
+            parser.reinstall_working(fresh, saved)?;
         }
 
         let n = parser.append(chunk)?;
@@ -113,7 +94,7 @@ impl DecodeSession {
             return Ok(0);
         }
 
-        parser.try_advance_stages()?;
+        parser.try_advance_stages(&mut self.pool)?;
         Ok(n)
     }
 
@@ -140,12 +121,10 @@ impl DecodeSession {
         }
 
         let trailer_owner = parser.working_buffer();
+        invariants::validate_view_owner(&trailer_view, trailer_owner, "finalize trailer")?;
         invariants::check_view_owner(&trailer_view, trailer_owner, "finalize trailer");
 
-        if !trailer_view.same_backing_as(trailer_owner) {
-            return Err(DecodeError::Internal("stale buffer view detected"));
-        }
-
+        invariants::validate_finalize_stage(parser)?;
         invariants::check_finalize_stage(parser);
 
         let trailer = trailer_view.as_slice();

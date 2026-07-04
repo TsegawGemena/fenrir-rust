@@ -2,6 +2,7 @@ use super::shared::{SharedBuffer, DEFAULT_CAPACITY, MAX_POOL_SIZE};
 use super::view::BufferView;
 use crate::error::DecodeError;
 
+/// Reusable backing buffers for incremental frame parsing.
 #[derive(Debug, Default)]
 pub struct BufferPool {
     free: Vec<SharedBuffer>,
@@ -56,17 +57,9 @@ impl BufferPool {
     }
 
     pub fn view_is_valid(&self, view: &BufferView, owner: &SharedBuffer) -> bool {
-        if view.is_stale() {
-            return false;
-        }
-        #[cfg(feature = "buggy")]
-        {
-            view.generation() == owner.generation()
-        }
-        #[cfg(not(feature = "buggy"))]
-        {
-            view.same_backing_as(owner)
-        }
+        !view.is_stale()
+            && view.same_backing_as(owner)
+            && view.generation() == owner.generation()
     }
 }
 

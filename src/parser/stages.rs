@@ -1,8 +1,11 @@
 //! Multi-stage frame parser: header → payload → trailer → complete.
+//!
+//! Parses **FENR** (Field Event Network Record) v1 frames.
 
 use crate::buffer::{BufferPool, BufferView, SharedBuffer};
 use crate::error::DecodeError;
 
+/// v1 magic: **F**ield **E**vent **N**etwork **R**ecord
 pub const MAGIC: [u8; 4] = *b"FENR";
 pub const HEADER_LEN: usize = 8;
 pub const TRAILER_LEN: usize = 4;
@@ -73,7 +76,6 @@ pub struct FrameParser {
     working: SharedBuffer,
     write_cursor: usize,
     released: bool,
-    pool: *mut BufferPool,
 }
 
 impl FrameParser {
@@ -83,13 +85,7 @@ impl FrameParser {
             working: pool.acquire()?,
             write_cursor: 0,
             released: false,
-            pool: pool as *mut BufferPool,
         })
-    }
-
-    fn pool(&mut self) -> &mut BufferPool {
-        // SAFETY: `DecodeSession` owns the pool and outlives the parser.
-        unsafe { &mut *self.pool }
     }
 
     pub fn working_buffer(&self) -> &SharedBuffer {
@@ -120,7 +116,7 @@ impl FrameParser {
     }
 
     /// Advance stages while enough bytes are buffered.
-    pub fn try_advance_stages(&mut self) -> Result<(), DecodeError> {
+    pub fn try_advance_stages(&mut self, pool: &mut BufferPool) -> Result<(), DecodeError> {
         loop {
             let needed = self.state.bytes_needed(self.write_cursor);
             if needed > 0 {
@@ -129,7 +125,7 @@ impl FrameParser {
 
             match self.state.stage {
                 Stage::Header => self.finish_header()?,
-                Stage::Payload => self.finish_payload()?,
+                Stage::Payload => self.finish_payload(pool)?,
                 Stage::Trailer => {
                     self.finish_trailer()?;
                     break;
@@ -171,7 +167,7 @@ impl FrameParser {
         Ok(())
     }
 
-    fn finish_payload(&mut self) -> Result<(), DecodeError> {
+    fn finish_payload(&mut self, pool: &mut BufferPool) -> Result<(), DecodeError> {
         let len = self.state.payload_len as usize;
         let payload = &self.working.as_slice()[0..len];
         self.state.feed_checksum(payload);
@@ -188,7 +184,7 @@ impl FrameParser {
         self.state.payload_view = Some(view);
 
         self.state.stage = Stage::Trailer;
-        let mut fresh = self.pool().acquire()?;
+        let mut fresh = pool.acquire()?;
         if !trailer_prefix.is_empty() {
             fresh.write_at(0, &trailer_prefix)?;
             self.write_cursor = trailer_prefix.len();
